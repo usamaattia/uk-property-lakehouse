@@ -1,0 +1,6 @@
+code,label,sort_order
+D,Detached,1
+S,Semi-detached,2
+T,Terraced,3
+F,Flat/maisonette,4
+O,Other,5

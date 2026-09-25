@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Lint, unit tests, dbt end-to-end (DuckDB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]" dbt-databricks
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Tests (ingestion, synthetic data, dbt pipeline on real sample + CDC)
+        run: pytest -v
+      - name: Full demo build (all models, data tests and dbt unit tests)
+        run: |
+          lakehouse demo
+          dbt build --project-dir transform --profiles-dir transform
+          lakehouse export-site
+      - name: Databricks target parses (no workspace needed)
+        env:
+          DBT_TARGET: databricks
+          LANDING_URI: /Volumes/workspace/uk_property/landing
+        run: dbt parse --project-dir transform --profiles-dir transform
+
+  engine-parity:
+    name: Same gold tables on DuckDB and Apache Spark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e . "pyspark==3.5.*" "dbt-spark[session]"
+      - run: lakehouse demo
+      - run: dbt build --project-dir transform --profiles-dir transform
+      - run: dbt build --project-dir transform --profiles-dir transform --target spark --full-refresh
+      - run: python scripts/check_engine_parity.py
+
+  airflow:
+    name: Airflow DAG integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install "apache-airflow==3.3.2" pytest \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt"
+      - run: pytest tests/test_airflow_dag.py -v
+        env:
+          AIRFLOW__CORE__LOAD_EXAMPLES: "False"

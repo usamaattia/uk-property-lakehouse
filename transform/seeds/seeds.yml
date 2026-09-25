@@ -1,0 +1,17 @@
+version: 2
+seeds:
+  - name: ref_property_type
+    description: Land Registry property type codes.
+    columns:
+      - name: code
+        data_tests: [unique, not_null]
+  - name: ref_tenure
+    description: Duration of tenure codes.
+    columns:
+      - name: code
+        data_tests: [unique, not_null]
+  - name: ref_ppd_category
+    description: Standard (A) vs additional (B) price paid entries.
+    columns:
+      - name: code
+        data_tests: [unique, not_null]

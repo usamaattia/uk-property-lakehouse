@@ -1,0 +1,28 @@
+# Credentials come from environment variables; nothing secret lives in this file.
+uk_property:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    # Local / CI / GitHub Actions: a single DuckDB file
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', 'warehouse/lakehouse.duckdb') }}"
+      threads: 4
+
+    # Databricks (Free Edition works): Delta tables in Unity Catalog
+    databricks:
+      type: databricks
+      host: "{{ env_var('DATABRICKS_HOST', 'not-set.cloud.databricks.com') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH', '/sql/1.0/warehouses/not-set') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN', 'not-set') }}"
+      catalog: "{{ env_var('DATABRICKS_CATALOG', 'workspace') }}"
+      schema: uk_property
+      threads: 8
+
+    # Plain Apache Spark in-process (pip install "dbt-spark[session]" pyspark).
+    # Used in CI to check that the SQL runs on the Spark engine that Databricks is built on.
+    spark:
+      type: spark
+      method: session
+      host: localhost
+      schema: uk_property
+      threads: 1

@@ -1,0 +1,82 @@
+# Databricks Asset Bundle: deploys the lakehouse as a scheduled Databricks job.
+#
+#   databricks auth login --host https://<your-workspace>.cloud.databricks.com
+#   databricks bundle validate
+#   databricks bundle deploy
+#   databricks bundle run uk_property_monthly
+#
+# Works on Databricks Free Edition (serverless compute + a SQL warehouse).
+bundle:
+  name: uk-property-lakehouse
+
+variables:
+  catalog:
+    description: Unity Catalog catalog to write to
+    default: workspace
+  schema:
+    description: Schema that holds the landing volume
+    default: uk_property
+  warehouse_id:
+    description: SQL warehouse ID for dbt (SQL Warehouses > your warehouse > Connection details)
+
+resources:
+  schemas:
+    uk_property:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: HM Land Registry Price Paid Data lakehouse
+
+  volumes:
+    landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.uk_property.name}
+      name: landing
+      comment: Raw Price Paid files exactly as downloaded
+
+  jobs:
+    uk_property_monthly:
+      name: uk-property-lakehouse (monthly)
+      schedule:
+        # Price Paid monthly update lands around the 20th working day; run on the 25th.
+        quartz_cron_expression: "0 0 6 25 * ?"
+        timezone_id: Europe/London
+      environments:
+        - environment_key: ingest_env
+          spec:
+            client: "2"
+            dependencies:
+              - httpx>=0.27
+        - environment_key: dbt_env
+          spec:
+            client: "2"
+            dependencies:
+              - dbt-databricks>=1.9
+      tasks:
+        - task_key: ingest
+          environment_key: ingest_env
+          spark_python_task:
+            python_file: ./orchestration/databricks/ingest_job.py
+            parameters:
+              - --src
+              - ${workspace.file_path}/src
+              - --landing
+              - /Volumes/${var.catalog}/${var.schema}/landing
+
+        - task_key: dbt_build
+          depends_on:
+            - task_key: ingest
+          environment_key: dbt_env
+          dbt_task:
+            project_directory: ./transform
+            # No profiles_directory: Databricks generates a profile for this warehouse.
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+            commands:
+              # Unit tests run in CI on DuckDB; production runs models + data tests.
+              - dbt build --exclude-resource-type unit_test --vars '{landing_path: /Volumes/${var.catalog}/${var.schema}/landing}'
+
+targets:
+  dev:
+    mode: development
+    default: true

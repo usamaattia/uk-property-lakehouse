@@ -1,0 +1,90 @@
+version: 2
+
+models:
+  - name: silver_transactions
+    description: >
+      Current state of the Price Paid register: one typed row per transaction after
+      applying every add (A), change (C) and delete (D) record in load order.
+      Deleted transactions are kept with is_deleted = true.
+    columns:
+      - name: transaction_id
+        data_tests: [unique, not_null]
+      - name: price
+        data_tests:
+          - not_null
+          - positive
+      - name: date_of_transfer
+        data_tests:
+          - not_null
+          - not_after_load_date
+      - name: property_type_code
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['D', 'S', 'T', 'F', 'O']
+      - name: tenure_code
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['F', 'L', 'U']
+      - name: ppd_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['A', 'B']
+      - name: district
+        data_tests: [not_null]
+
+unit_tests:
+  - name: silver_cleans_and_types_raw_rows
+    description: Braces stripped, dates and prices typed, postcode split, codes labelled.
+    model: silver_transactions
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('bronze_ppd')
+        rows:
+          - {transaction_id: "{5834e4e9-48a3-29c7-e063-4804a8c015bc}", price: "1450000", date_of_transfer: "2026-07-17 00:00", postcode: " gu15 1ae", property_type: "D", old_new: "N", duration: "F", paon: "WITTS END", saon: "", street: "SPRINGFIELD ROAD", locality: "", town_city: "CAMBERLEY", district: "SURREY HEATH", county: "SURREY", ppd_category: "A", record_status: "A", _source_file: "data/landing/ppd/load_id=20260801T000000Z/pp-2026.csv", _load_id: "20260801T000000Z"}
+      - input: ref('ref_property_type')
+        rows:
+          - {code: D, label: Detached, sort_order: 1}
+      - input: ref('ref_tenure')
+        rows:
+          - {code: F, label: Freehold}
+    expect:
+      rows:
+        - {transaction_id: "5834E4E9-48A3-29C7-E063-4804A8C015BC", price: 1450000, date_of_transfer: 2026-07-17, month: 2026-07-01, postcode: "GU15 1AE", postcode_district: "GU15", postcode_area: "GU", property_type: "Detached", tenure: "Freehold", is_new_build: false, saon: null, is_deleted: false, is_synthetic: false}
+
+  - name: silver_applies_changes_and_deletes_in_load_order
+    description: >
+      Incremental run. Already-merged loads are ignored; within the new batch the latest
+      version of each transaction wins; a D record becomes a soft delete.
+    model: silver_transactions
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      - input: this
+        # sql format: the fixture works even before silver exists in the warehouse
+        format: sql
+        rows: |
+          select 'T1' as transaction_id, '20260101T000000Z' as _load_id
+      - input: ref('bronze_ppd')
+        format: csv
+        rows: |
+          transaction_id,price,date_of_transfer,postcode,property_type,old_new,duration,ppd_category,district,record_status,_source_file,_load_id
+          {T1},100000,2025-05-01 00:00,AB1 2CD,T,N,F,A,X,A,f1.csv,20260101T000000Z
+          {T2},200000,2025-06-01 00:00,AB1 2CD,S,N,F,A,X,A,f2.csv,20260201T000000Z
+          {T3},300000,2025-06-01 00:00,AB1 2CD,F,Y,L,A,X,A,f2.csv,20260201T000000Z
+          {T3},310000,2025-06-01 00:00,AB1 2CD,F,Y,L,A,X,C,f3.csv,20260301T000000Z
+          {T4},400000,2025-07-01 00:00,AB1 2CD,D,N,F,A,X,D,f3.csv,20260301T000000Z
+      - input: ref('ref_property_type')
+        rows: []
+      - input: ref('ref_tenure')
+        rows: []
+    expect:
+      rows:
+        - {transaction_id: "T2", price: 200000, record_status: "A", is_deleted: false}
+        - {transaction_id: "T3", price: 310000, record_status: "C", is_deleted: false}
+        - {transaction_id: "T4", price: 400000, record_status: "D", is_deleted: true}

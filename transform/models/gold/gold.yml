@@ -1,0 +1,71 @@
+version: 2
+
+models:
+  - name: int_reporting_window
+    description: Shared reporting window (as-of month, last 12 months, prior 12 months).
+  - name: int_market_sales
+    description: Category A, non-deleted sales inside the reporting window.
+
+  - name: gold_monthly_prices
+    description: Monthly median / quartiles / mean price per district and property type.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [month, district, property_type_code]
+    columns:
+      - name: median_price
+        data_tests: [not_null, positive]
+      - name: sales
+        data_tests: [positive]
+
+  - name: gold_national_monthly
+    description: England & Wales monthly median price and sales volume, by property type.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [month, property_type_code]
+
+  - name: gold_district_summary
+    description: Last 12 months vs prior 12 months per district, with type breakdown.
+    columns:
+      - name: district
+        data_tests: [unique, not_null]
+      - name: median_price_12m
+        data_tests: [not_null, positive]
+      - name: median_price_yoy
+        description: Null when either period has fewer than 20 sales.
+
+  - name: gold_new_build_premium
+    description: >
+      New-build price premium per county, compared within property type to avoid mix
+      effects, weighted by new-build sales.
+    columns:
+      - name: county
+        data_tests: [unique, not_null]
+
+unit_tests:
+  - name: district_summary_computes_yoy_only_with_enough_sales
+    description: >
+      District A has 25 sales at 110k this year and 25 at 100k last year, so +10%.
+      District B has only 5 sales last year, so no year-on-year figure.
+    model: gold_district_summary
+    given:
+      - input: ref('int_reporting_window')
+        format: sql
+        rows: |
+          select cast('2026-05-01' as date) as as_of_month, cast('2025-06-01' as date) as last_12m_start,
+                 cast('2024-06-01' as date) as prior_12m_start, cast('2025-05-01' as date) as prior_12m_end
+      - input: ref('int_market_sales')
+        format: sql
+        rows: |
+          select 'A' as district, 'C' as county, cast('2026-01-01' as date) as month, 110000 as price, 'T' as property_type_code, false as is_new_build from range(25)
+          union all
+          select 'A', 'C', cast('2025-01-01' as date), 100000, 'T', false from range(25)
+          union all
+          select 'B', 'C', cast('2026-01-01' as date), 500000, 'D', true from range(30)
+          union all
+          select 'B', 'C', cast('2025-01-01' as date), 400000, 'D', false from range(5)
+    expect:
+      rows:
+        - {district: A, sales_12m: 25, sales_prior_12m: 25, median_price_12m: 110000, median_price_prior_12m: 100000, median_price_yoy: 0.1, new_build_share: 0.0, median_terraced: 110000, median_detached: null}
+        - {district: B, sales_12m: 30, sales_prior_12m: 5, median_price_12m: 500000, median_price_prior_12m: 400000, median_price_yoy: null, new_build_share: 1.0, median_terraced: null, median_detached: 500000}

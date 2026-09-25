@@ -1,0 +1,39 @@
+name: uk_property
+version: "0.1.0"
+config-version: 2
+profile: uk_property
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Where the landing zone lives: a local folder, or a Unity Catalog Volume on Databricks
+  landing_path: "{{ env_var('LANDING_URI', 'data/landing') }}"
+  # Recent months are incomplete in PPD because sales take weeks to be registered.
+  # Reports end this many months before the latest sale date seen.
+  registration_lag_months: 2
+
+models:
+  uk_property:
+    # Delta on Databricks, Parquet on plain Spark, ignored by DuckDB
+    +file_format: "{{ 'delta' if target.type == 'databricks' else 'parquet' }}"
+    bronze:
+      +schema: bronze
+      +materialized: incremental
+    silver:
+      +schema: silver
+      +materialized: incremental
+    gold:
+      +schema: gold
+      +materialized: table
+
+seeds:
+  uk_property:
+    +schema: reference
+
+tests:
+  +store_failures: false

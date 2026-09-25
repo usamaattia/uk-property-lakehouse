@@ -1,0 +1,23 @@
+# data and build outputs
+data/
+warehouse/*
+!warehouse/.gitkeep
+site/data/
+transform/target/
+transform/dbt_packages/
+transform/logs/
+logs/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.env
+.DS_Store
+.databricks/
